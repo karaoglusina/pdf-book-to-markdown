@@ -1,0 +1,48 @@
+# PDF to Markdown Converter Configuration
+
+# Input paths
+pdf_path: "book_pdfs/your-book.pdf"
+toc_path: "toc/your-book-toc.md"
+
+# Output path
+output_dir: "output/Your Book"
+
+# Processing options
+splitting:
+  depth: "sections"  # chapters, sections, or all_levels
+  include_intro_files: true
+
+# Header detection settings
+header_detection:
+  min_font_size_chapter: 16.0
+  min_font_size_section: 14.0
+  use_font_weight: true
+  fallback_to_pattern: true
+
+# Content extraction settings
+extraction:
+  # Extract images from PDF
+  extract_images: true
+  # Detect and extract footnotes
+  extract_footnotes: true
+  # Filter out repeating headers/footers
+  filter_headers_footers: true
+  # Minimum pages to sample for header/footer detection
+  header_footer_sample_pages: 50
+
+# Markdown generation
+markdown:
+  add_frontmatter: true
+  preserve_code_blocks: true
+  preserve_tables: true
+  # Include subsection content inline with proper headings
+  include_subsections: true
+  # Format footnotes at end of section
+  format_footnotes: true
+  # Include image references
+  include_images: true
+
+# Logging
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  file: "pdf_conversion.log"

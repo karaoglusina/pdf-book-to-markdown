@@ -1,0 +1,34 @@
+# Input PDFs (copyrighted — keep local only)
+book_pdfs/
+*.pdf
+
+# Table-of-contents inputs
+toc/
+REF BOOK TOC/
+
+# Generated output (derived from source books — keep local only)
+output/
+AI engineering/
+Hands On Large Language Models/
+Python NLP Cookbook/
+Speech and Language Processing/
+The Rise of AI Engineering - proper content.md
+
+# Logs
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

@@ -1,0 +1,41 @@
+# PDF to Markdown Converter Configuration - Speech and Language Processing
+
+# Input paths
+pdf_path: "book_pdfs/speech-and-language-processing.pdf"
+toc_path: "toc/speech-and-language-processing.md"
+
+# Output path
+output_dir: "output/Speech and Language Processing"
+
+# Processing options
+splitting:
+  depth: "sections"
+  include_intro_files: true
+
+# Header detection settings
+header_detection:
+  min_font_size_chapter: 16.0
+  min_font_size_section: 14.0
+  use_font_weight: true
+  fallback_to_pattern: true
+
+# Content extraction settings
+extraction:
+  extract_images: true
+  extract_footnotes: true
+  filter_headers_footers: true
+  header_footer_sample_pages: 50
+
+# Markdown generation
+markdown:
+  add_frontmatter: true
+  preserve_code_blocks: true
+  preserve_tables: true
+  include_subsections: true
+  format_footnotes: true
+  include_images: true
+
+# Logging
+logging:
+  level: "INFO"
+  file: "pdf_conversion.log"
