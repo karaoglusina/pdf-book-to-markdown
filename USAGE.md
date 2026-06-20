@@ -9,20 +9,34 @@ cd pdf-book-to-markdown
 pip install -r requirements.txt
 ```
 
-### 2. Configuration
+### 2. Run a Conversion
 
-Edit `config.yaml` to set your paths:
-
-```yaml
-pdf_path: "/path/to/your/book.pdf"
-toc_path: "/path/to/your/toc.md"
-output_dir: "./output"
-```
-
-### 3. Run Conversion
+The fastest way is with CLI flags — no config edits needed:
 
 ```bash
-python3 -m src.main
+python3 -m src.main --pdf book.pdf --toc toc.md
+```
+
+Output goes to `output/<pdf-name>/`. Set a custom destination with `-o`:
+
+```bash
+python3 -m src.main --pdf book.pdf --toc toc.md -o "output/My Book"
+```
+
+Flags override `config.yaml`, which still supplies every other default (font
+thresholds, splitting depth, etc.). To run purely from a config file instead:
+
+```bash
+python3 -m src.main                 # uses config.yaml
+python3 -m src.main my-config.yaml  # uses a specific config
+```
+
+To configure defaults, edit `config.yaml`:
+
+```yaml
+pdf_path: "book_pdfs/your-book.pdf"
+toc_path: "toc/your-book.md"
+output_dir: "output/Your Book"
 ```
 
 ## Output Structure

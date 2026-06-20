@@ -1,5 +1,6 @@
 """Main orchestration script for PDF to Markdown conversion."""
 
+import argparse
 import yaml
 import logging
 import sys
@@ -16,9 +17,12 @@ from .toc_updater import TOCUpdater
 class PDFToMarkdownConverter:
     """Main converter class that orchestrates the entire pipeline."""
     
-    def __init__(self, config_path: str = "config.yaml"):
+    def __init__(self, config_path: str = "config.yaml", overrides: Dict = None):
         self.config_path = config_path
         self.config = self._load_config()
+        if overrides:
+            self.config.update(overrides)
+        self._validate_config()
         self._setup_logging()
         
         self.logger = logging.getLogger(__name__)
@@ -31,10 +35,22 @@ class PDFToMarkdownConverter:
         self.toc_updater: TOCUpdater = None
         
     def _load_config(self) -> Dict:
-        """Load configuration from YAML file."""
-        with open(self.config_path, 'r', encoding='utf-8') as f:
-            config = yaml.safe_load(f)
-        return config
+        """Load configuration from YAML file (empty dict if it doesn't exist)."""
+        path = Path(self.config_path)
+        if not path.exists():
+            return {}
+        with open(path, 'r', encoding='utf-8') as f:
+            return yaml.safe_load(f) or {}
+
+    def _validate_config(self):
+        """Ensure required paths are set via the config file or CLI flags."""
+        required = ('pdf_path', 'toc_path', 'output_dir')
+        missing = [key for key in required if not self.config.get(key)]
+        if missing:
+            raise SystemExit(
+                "Error: missing required setting(s): " + ", ".join(missing) + "\n"
+                "Provide them in the config file or via --pdf / --toc / --output."
+            )
     
     def _setup_logging(self):
         """Setup logging configuration."""
@@ -241,17 +257,34 @@ class PDFToMarkdownConverter:
 
 def main():
     """Main entry point."""
-    # Get config path from command line or use default
-    config_path = sys.argv[1] if len(sys.argv) > 1 else "config.yaml"
-    
-    # Check if config exists
-    if not Path(config_path).exists():
-        print(f"Error: Config file not found: {config_path}")
-        print("Usage: python -m src.main [config.yaml]")
-        sys.exit(1)
-    
-    # Run converter
-    converter = PDFToMarkdownConverter(config_path)
+    parser = argparse.ArgumentParser(
+        prog="pdf-book-to-markdown",
+        description="Convert a technical PDF book into a structured markdown knowledge base.",
+    )
+    parser.add_argument(
+        "config", nargs="?", default="config.yaml",
+        help="Path to a YAML config file for defaults (default: config.yaml).",
+    )
+    parser.add_argument("--pdf", help="Input PDF path (overrides config pdf_path).")
+    parser.add_argument("--toc", help="Markdown TOC path (overrides config toc_path).")
+    parser.add_argument(
+        "-o", "--output",
+        help="Output directory (overrides config output_dir; defaults to "
+             "output/<pdf-name> when --pdf is given without --output).",
+    )
+    args = parser.parse_args()
+
+    overrides = {}
+    if args.pdf:
+        overrides["pdf_path"] = args.pdf
+    if args.toc:
+        overrides["toc_path"] = args.toc
+    if args.output:
+        overrides["output_dir"] = args.output
+    elif args.pdf:
+        overrides["output_dir"] = str(Path("output") / Path(args.pdf).stem)
+
+    converter = PDFToMarkdownConverter(args.config, overrides=overrides)
     converter.run()
 
 

@@ -26,9 +26,31 @@ Edit `config.yaml` to set:
 
 ## Usage
 
+Run a conversion straight from the command line — no need to edit `config.yaml`:
+
 ```bash
-python src/main.py
+python -m src.main --pdf book.pdf --toc toc.md
 ```
+
+This writes to `output/<pdf-name>/`. Override the destination with `-o/--output`:
+
+```bash
+python -m src.main --pdf book.pdf --toc toc.md -o "output/My Book"
+```
+
+Flags override the config file, which is still used for all other defaults
+(font thresholds, splitting depth, etc.). To run purely from a config file:
+
+```bash
+python -m src.main                 # uses config.yaml
+python -m src.main my-config.yaml  # uses a specific config
+```
+
+| Flag | Overrides | Description |
+|------|-----------|-------------|
+| `--pdf` | `pdf_path` | Input PDF |
+| `--toc` | `toc_path` | Markdown TOC |
+| `-o`, `--output` | `output_dir` | Output directory (defaults to `output/<pdf-name>`) |
 
 Or import as a module:
 
