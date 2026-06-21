@@ -36,10 +36,15 @@ class ContentSplitter:
     def split_content(self) -> Dict[str, SectionContent]:
         """Split PDF content according to TOC structure."""
         self.logger.info("Splitting content by sections")
-        
+
         # Get all sections from TOC
         all_sections = self.toc_parser.get_all_sections()
-        
+
+        # If the structure came from the PDF outline, page numbers are
+        # authoritative — split by those page ranges instead of guessing.
+        if getattr(self.toc_parser, 'flat', None):
+            return self._split_by_outline(all_sections)
+
         # Detect headers in PDF
         headers = self.pdf_parser.detect_headers()
         
@@ -54,7 +59,49 @@ class ContentSplitter:
         
         self.logger.info(f"Split content into {len(self.section_contents)} sections")
         return self.section_contents
-    
+
+    def _split_by_outline(self, all_sections: List[TOCItem]) -> Dict[str, SectionContent]:
+        """Split content using authoritative page ranges from the PDF outline."""
+        flat = self.toc_parser.flat
+        last_page = max((b.page_num for b in self.pdf_parser.blocks), default=1)
+
+        for section in all_sections:
+            page_start = section.page or 1
+            page_end = self._find_section_end(section, flat, last_page)
+
+            full_text = self._extract_text_between_pages(page_start, page_end)
+            subsection_texts = self._extract_subsection_texts(
+                section, full_text, [], page_start, page_end)
+            intro_text = self._extract_intro_text(section, full_text, page_start, page_end)
+
+            self.section_contents[section.number] = SectionContent(
+                section=section,
+                intro_text=intro_text,
+                full_text=full_text,
+                page_start=page_start,
+                page_end=page_end,
+                confidence=1.0,  # page ranges come straight from the outline
+                images=self.pdf_parser.get_images_for_pages(page_start, page_end),
+                footnotes=self.pdf_parser.get_footnotes_for_pages(page_start, page_end),
+                subsection_texts=subsection_texts,
+            )
+
+        self.logger.info(f"Split content into {len(self.section_contents)} sections (outline mode)")
+        return self.section_contents
+
+    def _find_section_end(self, section: TOCItem, flat: List[TOCItem],
+                          last_page: int) -> int:
+        """End page = start page of the next section or chapter (else doc end)."""
+        try:
+            idx = flat.index(section)
+        except ValueError:
+            return last_page
+
+        for item in flat[idx + 1:]:
+            if item.level <= section.level and item.page:
+                return max(item.page, section.page or 1)
+        return last_page
+
     def _normalize_text(self, text: str) -> str:
         """Normalize text for comparison."""
         # Remove extra whitespace, punctuation, lowercase
@@ -368,22 +415,22 @@ class ContentSplitter:
             return ""
         
         first_section = chapter.children[0]
-        if first_section.number not in self.section_contents:
+        content = self.section_contents.get(first_section.number)
+        first_page = first_section.page or (content.page_start if content else None)
+        if not first_page:
             return ""
-        
-        first_section_content = self.section_contents[first_section.number]
-        
-        # Text before first section is chapter intro
-        # We need to look at blocks before first section's page
-        chapter_start = first_section_content.page_start - 5  # Look back a few pages
-        chapter_end = first_section_content.page_start - 1
-        
+
+        # Text between the chapter heading and its first section is the intro.
+        # With an outline we know the exact chapter page; otherwise look back.
+        chapter_start = chapter.page if chapter.page else first_page - 5
+        chapter_end = first_page - 1
+
         if chapter_start < 1:
             chapter_start = 1
-        
+
         if chapter_end < chapter_start:
             return ""
-        
+
         return self._extract_text_between_pages(chapter_start, chapter_end)
 
 

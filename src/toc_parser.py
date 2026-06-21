@@ -14,6 +14,7 @@ class TOCItem:
     full_title: str  # With number prefix
     parent_number: Optional[str] = None  # Parent section number
     children: List['TOCItem'] = None
+    page: Optional[int] = None  # 1-based start page (set when parsed from PDF outline)
     
     def __post_init__(self):
         if self.children is None:

@@ -4,11 +4,11 @@ A Python tool to convert technical PDF books into structured markdown knowledge 
 
 ## Features
 
-- **Intelligent Structure Detection**: Automatically detects chapters, sections, and subsections using font analysis
-- **TOC-Driven Splitting**: Uses existing table of contents to guide content organization
+- **Embedded Outline Support**: Uses the PDF's built-in outline (bookmarks) by default — no table of contents file needed
+- **Intelligent Structure Detection**: Detects chapters, sections, and subsections from heading numbering, with font analysis as a fallback
+- **Optional TOC-Driven Splitting**: Supply your own markdown table of contents when a PDF has no usable outline
 - **Hierarchical Output**: Creates folder structure matching book organization
-- **Wikilink Integration**: Updates TOC with links to generated markdown files
-- **Robust Extraction**: Multiple fallback strategies for header detection
+- **Wikilink Integration**: Generates a TOC with links to the created markdown files
 
 ## Installation
 
@@ -26,16 +26,24 @@ Edit `config.yaml` to set:
 
 ## Usage
 
-Run a conversion straight from the command line — no need to edit `config.yaml`:
+Run a conversion straight from the command line — no need to edit `config.yaml`.
+By default the structure is read from the PDF's embedded outline, so only the
+PDF is required:
 
 ```bash
-python -m src.main --pdf book.pdf --toc toc.md
+python -m src.main --pdf book.pdf
 ```
 
 This writes to `output/<pdf-name>/`. Override the destination with `-o/--output`:
 
 ```bash
-python -m src.main --pdf book.pdf --toc toc.md -o "output/My Book"
+python -m src.main --pdf book.pdf -o "output/My Book"
+```
+
+If a PDF has no embedded outline, supply your own markdown TOC with `--toc`:
+
+```bash
+python -m src.main --pdf book.pdf --toc toc.md
 ```
 
 Flags override the config file, which is still used for all other defaults
@@ -49,7 +57,7 @@ python -m src.main my-config.yaml  # uses a specific config
 | Flag | Overrides | Description |
 |------|-----------|-------------|
 | `--pdf` | `pdf_path` | Input PDF |
-| `--toc` | `toc_path` | Markdown TOC |
+| `--toc` | `toc_path` | Markdown TOC (optional; embedded outline used if omitted) |
 | `-o`, `--output` | `output_dir` | Output directory (defaults to `output/<pdf-name>`) |
 
 Or import as a module:

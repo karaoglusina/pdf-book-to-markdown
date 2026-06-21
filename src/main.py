@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Dict
 
 from .toc_parser import TOCParser
+from .outline_parser import OutlineTOCParser
 from .pdf_parser import PDFParser
 from .content_splitter import ContentSplitter
 from .markdown_generator import MarkdownGenerator
@@ -44,12 +45,18 @@ class PDFToMarkdownConverter:
 
     def _validate_config(self):
         """Ensure required paths are set via the config file or CLI flags."""
-        required = ('pdf_path', 'toc_path', 'output_dir')
+        # Expand ~ in any provided paths so home-relative paths work.
+        for key in ('pdf_path', 'toc_path', 'output_dir'):
+            if self.config.get(key):
+                self.config[key] = str(Path(self.config[key]).expanduser())
+
+        # toc_path is optional: without it, the PDF's embedded outline is used.
+        required = ('pdf_path', 'output_dir')
         missing = [key for key in required if not self.config.get(key)]
         if missing:
             raise SystemExit(
                 "Error: missing required setting(s): " + ", ".join(missing) + "\n"
-                "Provide them in the config file or via --pdf / --toc / --output."
+                "Provide them in the config file or via --pdf / --output."
             )
     
     def _setup_logging(self):
@@ -106,12 +113,21 @@ class PDFToMarkdownConverter:
             raise
     
     def _parse_toc(self):
-        """Parse table of contents."""
-        toc_path = self.config['toc_path']
-        self.logger.info(f"Loading TOC from: {toc_path}")
-        
-        self.toc_parser = TOCParser(toc_path)
+        """Parse table of contents from a markdown file or the PDF outline."""
+        toc_path = self.config.get('toc_path')
+        if toc_path:
+            self.logger.info(f"Loading TOC from: {toc_path}")
+            self.toc_parser = TOCParser(toc_path)
+        else:
+            self.logger.info("No TOC file given; using the PDF's embedded outline")
+            self.toc_parser = OutlineTOCParser(self.config['pdf_path'])
+
         items = self.toc_parser.parse()
+        if not items:
+            raise SystemExit(
+                "Error: no structure found. The PDF has no embedded outline — "
+                "provide a TOC markdown file with --toc."
+            )
         
         self.logger.info(f"Parsed {len(items)} chapters")
         
@@ -180,9 +196,16 @@ class PDFToMarkdownConverter:
     
     def _update_toc(self, created_files: Dict[str, str]):
         """Update TOC with wikilinks."""
-        toc_path = self.config['toc_path']
         output_dir = Path(self.config['output_dir'])
-        
+        toc_path = self.config.get('toc_path')
+
+        # Outline mode has no source TOC file — render one from the structure.
+        if not toc_path:
+            toc_path = str(output_dir / "TOC.md")
+            with open(toc_path, 'w', encoding='utf-8') as f:
+                f.write(self.toc_parser.to_markdown())
+            self.logger.info(f"Wrote generated TOC: {toc_path}")
+
         self.toc_updater = TOCUpdater(toc_path, created_files)
         
         # Create backup in output directory
@@ -266,7 +289,11 @@ def main():
         help="Path to a YAML config file for defaults (default: config.yaml).",
     )
     parser.add_argument("--pdf", help="Input PDF path (overrides config pdf_path).")
-    parser.add_argument("--toc", help="Markdown TOC path (overrides config toc_path).")
+    parser.add_argument(
+        "--toc",
+        help="Markdown TOC path (overrides config toc_path). Optional — when "
+             "omitted, the PDF's embedded outline is used.",
+    )
     parser.add_argument(
         "-o", "--output",
         help="Output directory (overrides config output_dir; defaults to "

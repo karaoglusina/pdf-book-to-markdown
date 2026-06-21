@@ -11,16 +11,23 @@ pip install -r requirements.txt
 
 ### 2. Run a Conversion
 
-The fastest way is with CLI flags — no config edits needed:
+The fastest way is with CLI flags — no config edits needed. By default the
+structure is read from the PDF's embedded outline, so only the PDF is required:
 
 ```bash
-python3 -m src.main --pdf book.pdf --toc toc.md
+python3 -m src.main --pdf book.pdf
 ```
 
 Output goes to `output/<pdf-name>/`. Set a custom destination with `-o`:
 
 ```bash
-python3 -m src.main --pdf book.pdf --toc toc.md -o "output/My Book"
+python3 -m src.main --pdf book.pdf -o "output/My Book"
+```
+
+If the PDF has no embedded outline, supply a markdown TOC with `--toc`:
+
+```bash
+python3 -m src.main --pdf book.pdf --toc toc.md
 ```
 
 Flags override `config.yaml`, which still supplies every other default (font
