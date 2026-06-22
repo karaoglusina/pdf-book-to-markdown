@@ -1,9 +1,13 @@
 """Build book structure from a PDF's embedded outline (bookmarks).
 
 This is a drop-in alternative to TOCParser for books that ship with an
-embedded outline, so no external TOC markdown file is required. Hierarchy is
-driven by the numbering in each heading title (e.g. "1", "1.2", "1.2.3")
-rather than the outline's nesting depth, which is unreliable across books.
+embedded outline, so no external TOC markdown file is required.
+
+The outline's own nesting is used to build the hierarchy (it is the most
+reliable signal across publishers). "Part" dividers are flattened, front/back
+matter is dropped, and chapters/sections/subsections are then numbered
+positionally — so books whose section numbering restarts in every chapter
+(common in edited volumes) don't collide.
 """
 
 import re
@@ -12,10 +16,26 @@ from typing import List, Dict, Optional
 
 import fitz  # PyMuPDF
 
+# Top-level entries that are not book content.
+FRONT_MATTER = (
+    'cover', 'copyright', 'title page', 'table of contents', 'contents',
+    'brief contents', 'preface', 'foreword', 'acknowledg', 'about the',
+    'about this', 'index', 'list of figures', 'list of tables', 'dedication',
+    'glossary', 'bibliography', 'colophon', 'epigraph', 'frontmatter',
+    'references', 'further reading',
+)
+
 from .toc_parser import TOCItem
 
-# Unnumbered headings to keep as sections of the current chapter.
-KEEP_UNNUMBERED = {"summary", "exercises", "conclusion", "key takeaways"}
+
+class _Node:
+    """A raw outline entry while building the tree."""
+
+    def __init__(self, level: int, title: str, page: int):
+        self.level = level
+        self.title = title
+        self.page = max(1, page)
+        self.children: List['_Node'] = []
 
 
 class OutlineTOCParser:
@@ -25,7 +45,7 @@ class OutlineTOCParser:
         self.pdf_path = pdf_path
         self.items: List[TOCItem] = []          # top-level chapters
         self.chapter_map: Dict[str, TOCItem] = {}  # number -> item
-        self.flat: List[TOCItem] = []           # all kept items, document order
+        self.flat: List[TOCItem] = []           # all items, document order
         self.logger = logging.getLogger(__name__)
 
     def parse(self) -> List[TOCItem]:
@@ -38,29 +58,11 @@ class OutlineTOCParser:
             self.logger.warning("PDF has no embedded outline")
             return self.items
 
-        current_chapter: Optional[TOCItem] = None
-        current_section: Optional[TOCItem] = None
-
-        for _level, title, page in raw:
-            title = (title or "").strip()
-            if not title:
-                continue
-
-            number, clean_title, kind = self._classify(title)
-
-            if kind == "chapter":
-                current_chapter = self._add_chapter(number, clean_title, page)
-                current_section = None
-            elif kind == "section" and current_chapter:
-                current_section = self._add_section(current_chapter, number, clean_title, page)
-            elif kind == "subsection":
-                parent = self._resolve_section(number, current_section)
-                if parent:
-                    self._add_subsection(parent, number, clean_title, page)
-            elif kind == "extra" and current_chapter:
-                # Unnumbered chapter-closer such as "Summary".
-                current_section = self._add_section(current_chapter, None, clean_title, page)
-            # everything else (front/back matter, "Part N" dividers) is skipped
+        roots = self._build_tree(raw)
+        roots = self._flatten_parts(roots)
+        chapters = [r for r in roots if not self._is_front_matter(r.title)]
+        chapters = self._drop_leading_leaves(chapters)
+        self._build_items(chapters)
 
         self.logger.info(
             f"Outline parsed: {len(self.items)} chapters, "
@@ -68,63 +70,104 @@ class OutlineTOCParser:
         )
         return self.items
 
-    def _classify(self, title: str):
-        """Return (number, clean_title, kind) for a heading title."""
-        m = re.match(r'^(\d+(?:\.\d+){2,})\s+(.*)$', title)  # 1.2.3[.4...]
-        if m:
-            return m.group(1), m.group(2).strip(), "subsection"
+    # --- tree building ------------------------------------------------------
 
-        m = re.match(r'^(\d+\.\d+)\s+(.*)$', title)          # 1.2
-        if m:
-            return m.group(1), m.group(2).strip(), "section"
+    def _build_tree(self, raw) -> List[_Node]:
+        """Turn the flat [level, title, page] list into a forest."""
+        roots: List[_Node] = []
+        stack: List[_Node] = []
+        for level, title, page in raw:
+            title = (title or "").strip()
+            if not title:
+                continue
+            node = _Node(level, title, page)
+            while stack and stack[-1].level >= level:
+                stack.pop()
+            if stack:
+                stack[-1].children.append(node)
+            else:
+                roots.append(node)
+            stack.append(node)
+        return roots
 
-        m = re.match(r'^(?:Chapter\s+)?(\d+)[:.\s]+(.*)$', title, re.IGNORECASE)  # 1 / Chapter 1
-        if m and not re.match(r'^Part\b', title, re.IGNORECASE):
-            return m.group(1), m.group(2).strip(), "chapter"
+    def _flatten_parts(self, roots: List[_Node]) -> List[_Node]:
+        """Replace top-level 'Part' dividers with their child chapters."""
+        flat: List[_Node] = []
+        for root in roots:
+            if self._is_part(root.title) and root.children:
+                flat.extend(root.children)
+            else:
+                flat.append(root)
+        return flat
 
-        if title.lower() in KEEP_UNNUMBERED:
-            return None, title, "extra"
+    def _drop_leading_leaves(self, roots: List[_Node]) -> List[_Node]:
+        """Drop title page / leading leaves that precede the first real chapter.
 
-        return None, title, "skip"
+        A real chapter has sections (children); a title page is a childless leaf
+        at the very front. Only applied when the book has nested structure.
+        """
+        if not any(r.children for r in roots):
+            return roots
+        first = next(i for i, r in enumerate(roots) if r.children)
+        return roots[first:]
 
-    def _add_chapter(self, number: str, title: str, page: int) -> TOCItem:
-        if number in self.chapter_map:
-            return self.chapter_map[number]
-        item = TOCItem(level=1, number=number, title=title,
-                       full_title=f"{number}. {title}", page=page)
-        self.items.append(item)
-        self.chapter_map[number] = item
-        self.flat.append(item)
-        return item
+    def _build_items(self, chapters: List[_Node]):
+        """Convert chapter nodes into the numbered TOCItem hierarchy."""
+        for c_idx, ch in enumerate(chapters, 1):
+            chapter = self._make_item(1, str(c_idx), ch.title, None, ch.page)
+            self.items.append(chapter)
+            self.chapter_map[chapter.number] = chapter
+            self.flat.append(chapter)
 
-    def _add_section(self, chapter: TOCItem, number: Optional[str],
-                     title: str, page: int) -> TOCItem:
-        if number is None:  # positional number for unnumbered sections (e.g. Summary)
-            number = f"{chapter.number}.{len(chapter.children) + 1}"
-        item = TOCItem(level=2, number=number, title=title,
-                       full_title=f"{number} {title}",
-                       parent_number=chapter.number, page=page)
-        chapter.children.append(item)
-        self.chapter_map[number] = item
-        self.flat.append(item)
-        return item
+            section_nodes = ch.children or [ch]  # chapter with no sections -> itself
+            for s_idx, sn in enumerate(section_nodes, 1):
+                snum = f"{c_idx}.{s_idx}"
+                section = self._make_item(2, snum, sn.title, chapter.number, sn.page)
+                chapter.children.append(section)
+                self.chapter_map[snum] = section
+                self.flat.append(section)
 
-    def _add_subsection(self, section: TOCItem, number: str,
-                        title: str, page: int) -> TOCItem:
-        item = TOCItem(level=3, number=number, title=title,
-                       full_title=f"{number} {title}",
-                       parent_number=section.number, page=page)
-        section.children.append(item)
-        self.chapter_map[number] = item
-        self.flat.append(item)
-        return item
+                # Flatten everything below a section into a single subsection list.
+                descendants = [] if sn is ch else self._descendants(sn)
+                for k_idx, dn in enumerate(descendants, 1):
+                    knum = f"{snum}.{k_idx}"
+                    sub = self._make_item(3, knum, dn.title, snum, dn.page)
+                    section.children.append(sub)
+                    self.chapter_map[knum] = sub
+                    self.flat.append(sub)
 
-    def _resolve_section(self, sub_number: str,
-                         current_section: Optional[TOCItem]) -> Optional[TOCItem]:
-        """Find the section a subsection belongs to (by its N.M prefix)."""
-        parts = sub_number.split('.')
-        parent_number = '.'.join(parts[:2])
-        return self.chapter_map.get(parent_number) or current_section
+    def _descendants(self, node: _Node) -> List[_Node]:
+        """Pre-order list of all nodes beneath a section."""
+        out = []
+        for child in node.children:
+            out.append(child)
+            out.extend(self._descendants(child))
+        return out
+
+    def _make_item(self, level: int, number: str, raw_title: str,
+                   parent: Optional[str], page: int) -> TOCItem:
+        title = self._clean_title(raw_title)
+        prefix = number + ("." if level == 1 else " ")
+        return TOCItem(level=level, number=number, title=title,
+                       full_title=f"{prefix}{title}", parent_number=parent, page=page)
+
+    # --- title / divider helpers --------------------------------------------
+
+    def _clean_title(self, title: str) -> str:
+        """Strip leading numbering so it isn't duplicated by positional numbers."""
+        t = title.strip()
+        t = re.sub(r'^Chapter\s+\d+\s*[:.\-]?\s*', '', t, flags=re.IGNORECASE)
+        t = re.sub(r'^\d+(?:\.\d+)*\.?\s+', '', t)
+        return t.strip() or title.strip()
+
+    def _is_part(self, title: str) -> bool:
+        t = title.strip()
+        return bool(re.match(r'^Part\b', t, re.IGNORECASE) or
+                    re.match(r'^[IVXLCDM]+\s*[:.]\s+\S', t))
+
+    def _is_front_matter(self, title: str) -> bool:
+        t = title.strip().lower()
+        return any(t == k or t.startswith(k) for k in FRONT_MATTER)
 
     # --- TOCParser-compatible interface -------------------------------------
 
